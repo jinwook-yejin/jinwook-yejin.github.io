@@ -250,8 +250,13 @@ body.intro-on{overflow:hidden}
 .copy{flex:none;height:32px;padding:0 12px;border-radius:8px;background:var(--fill);font-size:12.5px}
 
 /* ═════ 사진 공유 ═════ */
-.capture-ill{width:76px;height:76px;margin:28px auto 0;border-radius:50%;background:var(--fill);display:grid;place-items:center;color:var(--accent-ink)}
-.capture-ill svg{width:32px;height:32px}
+.capture-ill{width:min(58%,230px);margin:30px auto 0}
+.capture-ill img{width:100%;height:auto;filter:drop-shadow(0 12px 18px rgba(30,36,24,.18))}
+.up-grid .ph{position:relative}
+.up-grid .ph img{display:block}
+.up-grid .del{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;background:rgba(20,24,16,.72);color:#fff;display:grid;place-items:center;font-size:15px;line-height:1}
+.up-grid .ph.busy{opacity:.4;pointer-events:none}
+.up-title{font-size:12.5px;color:var(--ink-3);margin-top:22px}
 .capture .btn{margin-top:24px;min-width:200px}
 .up-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-top:22px}
 .up-grid img{aspect-ratio:1;width:100%;object-fit:cover;border-radius:4px}
@@ -473,7 +478,7 @@ footer{font-family:var(--en);font-size:10px;letter-spacing:.2em;color:rgba(247,2
     <p class="label up">CAPTURE OUR MOMENTS</p>
     <h2 class="title up">축하 사진 공유</h2>
     <p class="lead up">두 사람과 함께한 순간을 나눠 주세요.<br>아래 버튼으로 언제든 사진을 올릴 수 있어요.</p>
-    <div class="capture-ill up" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.6"/></svg></div>
+    <div class="capture-ill up" aria-hidden="true"><img src="assets/camera.png" alt="" loading="lazy"></div>
     <button class="btn btn-dark up" type="button" id="uploadBtn">사진 업로드</button>
     <input type="file" id="uploadInput" accept="image/*" multiple hidden>
     <p class="hint up" id="uploadHint"></p>
@@ -636,6 +641,7 @@ const CONFIG = {
     { src: 'assets/p6.jpg', thumb: 'assets/p6_s.jpg', pos: '48% 62%', alt: '지나가는 전철을 배경으로 팔짱을 낀 신랑과 신부' }
   ],
   introDuration: 4600,    // 인트로가 보이는 시간(ms) — 화면을 누르면 바로 넘어감
+  rsvpSheetUrl: 'https://script.google.com/macros/s/AKfycbwvfnIAb1JV77R2dmO8Tp9XdeBdOO2PZpT9mz55zCKQ1BLTDVPWcNtu0mn37xsPUoz4ug/exec',   // 참석 의사 구글 시트 연결
   rsvpPopupDelay: 3400,   // 인트로가 끝난 뒤 참석 의사 팝업이 뜨기까지(ms)
   uploadOpensAt: '2026-01-01T00:00:00+09:00',   // 하객 사진 업로드 시작 시각 (지금은 바로 열림)
   shareUrl: location.href.split('#')[0]
@@ -849,7 +855,11 @@ const getSvc = () => _svc || (_svc = (async () => {
   const assets = {
     upload: async blob => { const path = `guest-photos/${me}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`;
       await S.uploadBytes(S.ref(st, path), blob, { contentType: 'image/jpeg' });
-      return { id: path, url: URL.createObjectURL(blob) }; }
+      return { id: path, url: URL.createObjectURL(blob) }; },
+    // 내가 올린 사진만 불러오기 / 지우기 (보안 규칙이 본인 폴더만 허용)
+    listMine: async () => { const r = await S.listAll(S.ref(st, `guest-photos/${me}`));
+      return Promise.all(r.items.map(async it => ({ id: it.fullPath, url: await S.getDownloadURL(it) }))); },
+    remove: id => S.deleteObject(S.ref(st, id))
   };
   return { db, me, assets };
 })().catch(e => { console.warn('Firebase 연결 실패', e); return {}; }));
@@ -912,7 +922,9 @@ const whenNear = (el, fn) => { const o = new IntersectionObserver(es => { if (es
     const name = $('#rsName').value.trim(); if (!name) { toast('성함을 적어 주세요'); return $('#rsName').focus(); }
     const attend = form.attend.value, data = { side: form.side.value, attend, name, count: attend === '참석' ? count : 0, meal: attend === '참석' ? form.meal.value : '', msg: $('#rsMsg').value.trim(), ts: Date.now() };
     const btn = $('#rsSave'); btn.disabled = true;
-    try { await db.doc('rsvp/' + me).set(data); mine = data; closeSheet(sheet); toast(data.attend === '참석' ? `${data.name}님, ${data.count}명 참석으로 전달했어요` : `${data.name}님, 불참으로 전달했어요`); }
+    try { await db.doc('rsvp/' + me).set(data); mine = data;
+      // 구글 시트 + 메일 알림으로도 전달 (실패해도 Firebase에는 저장됨)
+      if (CONFIG.rsvpSheetUrl) fetch(CONFIG.rsvpSheetUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...data, id: me }) }).catch(() => {}); closeSheet(sheet); toast(data.attend === '참석' ? `${data.name}님, ${data.count}명 참석으로 전달했어요` : `${data.name}님, 불참으로 전달했어요`); }
     catch (err) { toast('전달하지 못했어요. 잠시 후 다시 시도해 주세요'); }
     btn.disabled = false; });
 })();
@@ -946,6 +958,20 @@ const whenNear = (el, fn) => { const o = new IntersectionObserver(es => { if (es
     const c = document.createElement('canvas'); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
     c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); return await new Promise(r => c.toBlob(r, 'image/jpeg', .86));
   }
+  const title = document.createElement('p'); title.className = 'up-title'; title.hidden = true;
+  title.textContent = '내가 올린 사진 · 잘못 올린 사진은 ✕를 눌러 지울 수 있어요';
+  grid.before(title);
+  function addThumb(a, first) {
+    const el = document.createElement('div'); el.className = 'ph';
+    el.innerHTML = `<img src="${a.url}" alt="내가 올린 축하 사진" loading="lazy"><button class="del" type="button" aria-label="이 사진 지우기">✕</button>`;
+    el.querySelector('.del').onclick = async () => {
+      el.classList.add('busy');
+      try { await assets.remove(a.id); el.remove(); toast('사진을 지웠어요'); }
+      catch (e) { el.classList.remove('busy'); toast('지우지 못했어요. 잠시 후 다시 시도해 주세요'); }
+      title.hidden = !grid.children.length;
+    };
+    first ? grid.prepend(el) : grid.append(el); title.hidden = false;
+  }
   btn.onclick = () => input.click();
   input.onchange = async () => {
     const files = [...input.files].slice(0, 20); input.value = ''; if (!files.length) return;
@@ -953,14 +979,14 @@ const whenNear = (el, fn) => { const o = new IntersectionObserver(es => { if (es
     for (const f of files) {
       try { hint.textContent = `올리는 중… ${ok + 1} / ${files.length}`;
         const a = await assets.upload(await shrink(f));
-        mineIds.push(a.id); ok++;
-        grid.insertAdjacentHTML('afterbegin', `<img src="${a.url}" alt="하객이 올린 축하 사진" loading="lazy">`);
+        mineIds.push(a.id); ok++; addThumb(a, true);
       } catch (e) { toast('일부 사진을 올리지 못했어요'); }
     }
     toast(ok ? `${ok}장을 올렸어요. 고맙습니다!` : '사진을 올리지 못했어요'); state();
   };
   let asked = false;
-  const connect = () => { if (asked || !isOpen()) return; asked = true; getSvc().then(s => { db = s.db; me = s.me; assets = s.assets || null; state(); }); };
+  const connect = () => { if (asked || !isOpen()) return; asked = true; getSvc().then(async s => { db = s.db; me = s.me; assets = s.assets || null; state();
+    if (assets && me) { try { (await assets.listMine()).sort((x, y) => y.id.localeCompare(x.id)).forEach(a => addThumb(a, false)); } catch (e) {} } }); };
   whenNear($('#capture'), connect); setInterval(connect, 30000);
 })();
 
